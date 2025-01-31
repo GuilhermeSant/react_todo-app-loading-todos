@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserWarning } from './UserWarning';
-import { USER_ID, getTodos, createTodo, updateTodo, deleteTodo } from './api/todos';
+import {
+  USER_ID,
+  getTodos,
+  createTodo,
+  updateTodo,
+  deleteTodo,
+} from './api/todos';
 import { Todo } from './types/Todo';
 
 export const App: React.FC = () => {
@@ -10,6 +16,7 @@ export const App: React.FC = () => {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
   const inputRef = useRef<HTMLInputElement>(null);
+  const [loadingTodos, setLoadingTodos] = useState<number[]>([]);
 
   useEffect(() => {
     if (!USER_ID) {
@@ -26,6 +33,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (error) {
       const timer = setTimeout(() => setError(''), 3000);
+
       return () => clearTimeout(timer);
     }
   }, [error]);
@@ -40,17 +48,18 @@ export const App: React.FC = () => {
     event.preventDefault();
     if (!newTodo.trim()) {
       setError('Title should not be empty');
+
       return;
     }
 
-    setError(''); // Hide error before new request
+    setError('');
     setLoading(true);
     createTodo({
       userId: USER_ID,
       title: newTodo.trim(),
       completed: false,
     })
-      .then(todo => setTodos([...todos, todo]))
+      .then(todo => setTodos(prev => [...prev, todo]))
       .catch(() => setError('Unable to add a todo'))
       .finally(() => {
         setLoading(false);
@@ -58,38 +67,58 @@ export const App: React.FC = () => {
       });
   };
 
-  const handleToggleTodo = (id: number) => {
-    const todo = todos.find(todo => todo.id === id);
-    if (!todo) return;
+  const handleToggleTodo = async (id: number) => {
+    const existingTodo = todos.find(todo => todo.id === id);
 
-    setError(''); // Hide error before new request
-    setLoading(true);
-    updateTodo(id, { completed: !todo.completed })
-      .then(updatedTodo => {
-        setTodos(todos.map(todo => (todo.id === id ? updatedTodo : todo)));
-      })
-      .catch(() => setError('Unable to update a todo'))
-      .finally(() => setLoading(false));
+    if (!existingTodo) {
+      return;
+    }
+
+    setError('');
+    setLoadingTodos(prev => [...prev, id]);
+
+    try {
+      const updatedTodo = await updateTodo(id, {
+        completed: !existingTodo.completed,
+      });
+
+      setTodos(prevTodos =>
+        prevTodos.map(item => (item.id === id ? updatedTodo : item)),
+      );
+    } catch {
+      setError('Unable to update a todo');
+    } finally {
+      setLoadingTodos(prev => prev.filter(todoId => todoId !== id));
+    }
   };
 
-  const handleDeleteTodo = (id: number) => {
-    setError(''); // Hide error before new request
-    setLoading(true);
-    deleteTodo(id)
-      .then(() => {
-        setTodos(todos.filter(todo => todo.id !== id));
-      })
-      .catch(() => setError('Unable to delete a todo'))
-      .finally(() => setLoading(false));
+  const handleDeleteTodo = async (id: number) => {
+    setError('');
+    setLoadingTodos(prev => [...prev, id]);
+
+    try {
+      await deleteTodo(id);
+      setTodos(prevTodos => prevTodos.filter(todo => todo.id !== id));
+    } catch {
+      setError('Unable to delete a todo');
+    } finally {
+      setLoadingTodos(prev => prev.filter(todoId => todoId !== id));
+    }
+  };
+
+  const handleToggleAll = () => {
+    todos.forEach(todo => handleToggleTodo(todo.id));
   };
 
   const filteredTodos = todos.filter(todo => {
     if (filter === 'active') {
       return !todo.completed;
     }
+
     if (filter === 'completed') {
       return todo.completed;
     }
+
     return true;
   });
 
@@ -107,10 +136,7 @@ export const App: React.FC = () => {
             type="button"
             className={`todoapp__toggle-all ${todos.every(todo => todo.completed) ? 'active' : ''}`}
             data-cy="ToggleAllButton"
-            onClick={() => {
-              const allCompleted = todos.every(todo => todo.completed);
-              todos.forEach(todo => handleToggleTodo(todo.id));
-            }}
+            onClick={handleToggleAll}
             disabled={loading}
           />
 
@@ -130,16 +156,22 @@ export const App: React.FC = () => {
 
         <section className="todoapp__main" data-cy="TodoList">
           {filteredTodos.map(todo => (
-            <div key={todo.id} data-cy="Todo" className={`todo ${todo.completed ? 'completed' : ''}`}>
-              <label className="todo__status-label">
-                <input
-                  data-cy="TodoStatus"
-                  type="checkbox"
-                  className="todo__status"
-                  checked={todo.completed}
-                  onChange={() => handleToggleTodo(todo.id)}
-                  disabled={loading}
-                />
+            <div
+              key={todo.id}
+              data-cy="Todo"
+              className={`todo ${todo.completed ? 'completed' : ''}`}
+            >
+              <input
+                id={`todo-${todo.id}`}
+                data-cy="TodoStatus"
+                type="checkbox"
+                className="todo__status"
+                checked={todo.completed}
+                onChange={() => handleToggleTodo(todo.id)}
+                disabled={loading}
+              />
+              <label className="todo__status-label" htmlFor={`todo-${todo.id}`}>
+                Marcar como concluído
               </label>
 
               <span data-cy="TodoTitle" className="todo__title">
@@ -156,11 +188,15 @@ export const App: React.FC = () => {
                 ×
               </button>
 
-              {loading && (
-                <div data-cy="TodoLoader" className="modal overlay is-active">
+              {loadingTodos && (
+                <>
+                  <div
+                    data-cy="TodoLoader"
+                    className={`modal overlay ${loading ? 'is-active' : ''}`}
+                  />
                   <div className="modal-background has-background-white-ter" />
                   <div className="loader" />
-                </div>
+                </>
               )}
             </div>
           ))}
@@ -203,7 +239,22 @@ export const App: React.FC = () => {
               type="button"
               className="todoapp__clear-completed"
               data-cy="ClearCompletedButton"
-              onClick={() => todos.filter(todo => todo.completed).forEach(todo => handleDeleteTodo(todo.id))}
+              onClick={() => {
+                const completedTodos = todos.filter(todo => todo.completed);
+
+                Promise.all(
+                  completedTodos.map(todo => handleDeleteTodo(todo.id)),
+                )
+                  .then(() => {
+                    throw new Error('All completed todos deleted successfully');
+                  })
+                  .catch(err => {
+                    throw new Error(
+                      'An error occurred while deleting todos:',
+                      err,
+                    );
+                  });
+              }}
               disabled={loading || todos.every(todo => !todo.completed)}
             >
               Clear completed
@@ -216,7 +267,12 @@ export const App: React.FC = () => {
         data-cy="ErrorNotification"
         className={`notification is-danger is-light has-text-weight-normal closehidden ${error ? '' : 'hidden'}`}
       >
-        <button data-cy="HideErrorButton" type="button" className="delete" onClick={() => setError('')} />
+        <button
+          data-cy="HideErrorButton"
+          type="button"
+          className="delete"
+          onClick={() => setError('')}
+        />
         {error}
       </div>
     </div>
