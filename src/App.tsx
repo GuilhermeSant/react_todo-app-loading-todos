@@ -170,9 +170,7 @@ export const App: React.FC = () => {
                 onChange={() => handleToggleTodo(todo.id)}
                 disabled={loading}
               />
-              <label className="todo__status-label" htmlFor={`todo-${todo.id}`}>
-                Marcar como concluído
-              </label>
+
 
               <span data-cy="TodoTitle" className="todo__title">
                 {todo.title}
@@ -183,12 +181,12 @@ export const App: React.FC = () => {
                 className="todo__remove"
                 data-cy="TodoDelete"
                 onClick={() => handleDeleteTodo(todo.id)}
-                disabled={loading}
+                disabled={loadingTodos.includes(todo.id)}
               >
                 ×
               </button>
 
-              {loadingTodos && (
+              {loadingTodos.includes(todo.id) && (
                 <>
                   <div
                     data-cy="TodoLoader"
